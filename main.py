@@ -3,13 +3,11 @@ import cplex
 from cplex.exceptions import CplexError
 import sys
 
-
-
-file1 = open('gen-ip002.mps')
+file1 = open('mps_files/gen-ip002.mps')
 lines = file1.readlines()
 
-
 def parse_mps():
+
     rhs = []
     lower_bounds = []
     upper_bounds = []
@@ -17,201 +15,221 @@ def parse_mps():
     constraints_names = []
     types = ""
     senses = ""
-    flag_read_parts = {"NAME": False,
-                       "COLUMNS": False,
-                       "ROWS": False,
-                       "RHS": False,
-                       "BOUNDS": False}
+    reading_now = ""
+    obj_sense = "MIN"
 
     constraints_var_n_values = {}
-    rhs_values={}
     variables = {}
-    obj_values = {}
     obj = []
     obj_name = ""
 
     marker_session = "C"
+
+    variable_name = "x"
+    constraint_name = "r"
+
+    counter_constraints = 0
+    counter_variables = 0
+
+    map_variables = {}
+    map_constraints = {}
     for line in lines:
+        if line.startswith("OBJSENSE"):
+            reading_now = "OBJSENSE"
+
         if line.startswith("ROWS"):
-            flag_read_parts["ROWS"] = True
-            flag_read_parts["COLUMNS"] = False
-            flag_read_parts["NAME"] = False
-            flag_read_parts["RHS"] = False
-            flag_read_parts["BOUNDS"] = False
+            reading_now = "ROWS"
 
         if line.startswith("COLUMNS"):
-            flag_read_parts["ROWS"] = False
-            flag_read_parts["COLUMNS"] = True
-            flag_read_parts["NAME"] = False
-            flag_read_parts["RHS"] = False
-            flag_read_parts["BOUNDS"] = False
+            reading_now = "COLUMNS"
 
         if line.startswith("RHS"):
-            flag_read_parts["ROWS"] = False
-            flag_read_parts["COLUMNS"] = False
-            flag_read_parts["NAME"] = False
-            flag_read_parts["RHS"] = True
-            flag_read_parts["BOUNDS"] = False
+            reading_now = "RHS"
 
         if line.startswith("BOUNDS"):
-            flag_read_parts["ROWS"] = False
-            flag_read_parts["COLUMNS"] = False
-            flag_read_parts["NAME"] = False
-            flag_read_parts["RHS"] = False
-            flag_read_parts["BOUNDS"] = True
+            reading_now = "BOUNDS"
+
+        if line.startswith("ENDATA"):
+            reading_now = "ENDATA"
+
+        if reading_now == "OBJSENSE" and not line.startswith("OBJSENSE"):
+            fields = line.split()
+            obj_sense = fields[0]
 
 
-        if flag_read_parts["ROWS"] and not line.startswith("ROWS"):
+        if reading_now == "ROWS" and not line.startswith("ROWS"):
             if line.split()[0] != "N":
-                senses = senses + (line.split()[0])
+                counter_constraints += 1
                 name_constraint = line.split()[1]
-                constraints_var_n_values[name_constraint] = {"variables": [],
+                map_constraints[name_constraint] = constraint_name + str(counter_constraints)
+
+                senses = senses + (line.split()[0])
+                constraints_var_n_values[map_constraints[name_constraint]] = {"variables": [],
                                                              "values": [],
                                                              "rhs": 0.00,
-
                                                              }
-                constraints_names.append(name_constraint)
+                constraints_names.append(map_constraints[name_constraint])
+
             elif line.split()[0] == "N":
                 obj_name = line.split()[1]
 
 
 
-        if flag_read_parts["COLUMNS"] and not line.startswith("COLUMNS"):
-
+        if reading_now == "COLUMNS" and not line.startswith("COLUMNS"):
             fields = line.split()
-            len(fields)
+            name_variable = fields[0]
+            if fields[0] not in map_variables.keys() and fields[0] != "MARK0000" and fields[0] != "MARK0001":
+                counter_variables += 1
+                map_variables[name_variable] = variable_name + str(counter_variables)
+                var_index = map_variables[name_variable]
 
-            if fields[0] not in variables and fields[0] != "MARK0000" and fields[0] != "MARK0001":
-                variables[fields[0]] = {"constraint_names": [],
-                                        "constraint_values": [],
-                                        "LB": 0.00,
-                                        "UB": cplex.infinity,
-                                        "type": "C"}
+            if fields[0] != "MARK0000" and fields[0] != "MARK0001":
+                if var_index not in variables:
+                    variables[var_index] = {"constraint_names": [],
+                                            "constraint_values": [],
+                                            "lower_bound": 0.00,
+                                            "upper_bound": cplex.infinity,
+                                            "type": "C",
+                                            obj_name: 0.00}
+
             for index, field in enumerate(fields):
-                if index!= 0:
-                    if index%2 != 0 and field != "'MARKER'":
-                        if field in constraints_var_n_values:
-                            constraints_var_n_values[field]["variables"].append(fields[0])
-                            constraints_var_n_values[field]["values"].append(float(fields[index+1]))
-                            variables[fields[0]]["constraint_names"].append(fields[index])
-                            variables[fields[0]]["constraint_values"].append(float(fields[index+1]))
+                    if index != 0 and index % 2 != 0 and field != "'MARKER'" and field != obj_name:
+                        constraint_index = map_constraints[fields[index]]
+                        if constraint_index in constraints_var_n_values.keys():
+                            constraint_index = map_constraints[fields[index]]
+                            constraints_var_n_values[constraint_index]["variables"].append(var_index)
+                            constraints_var_n_values[constraint_index]["values"].append(float(fields[index+1]))
+                            variables[var_index]["constraint_names"].append(constraint_index)
+                            variables[var_index]["constraint_values"].append(float(fields[index + 1]))
+
 
                     if index%2 != 0 and field == obj_name:
-                        obj_values[fields[0]] = fields[index+1]
+                        variables[var_index].update({obj_name: fields[index+1]})
 
-
-            if fields[0] == "MARK0000":
+            if fields[2] == "'INTORG'":
                     marker_session = "I"
 
-            elif fields[0] == "MARK00000":
+            elif fields[2] == "'INTEND'":
                     marker_session = "C"
 
             if marker_session == "C" and fields[1] != "'MARKER'":
-                variables[fields[0]].update( {"LB": float(0.00),
-                                        "UB": cplex.infinity,
+                variables[map_variables[fields[0]]].update( {"lower_bound": float(0.00),
+                                        "upper_bound": cplex.infinity,
                                         "type": "C"})
 
             elif marker_session == "I" and fields[1] != "'MARKER'":
-                variables[fields[0]].update({"LB": float(0.00),
-                                        "UB": cplex.infinity,
+                variables[map_variables[fields[0]]].update({"lower_bound": float(0.00),
+                                        "upper_bound": cplex.infinity,
                                         "type": "I"
                                        })
 
 
-        if flag_read_parts["RHS"] and not line.startswith("RHS"):
+        if reading_now == "RHS" and not line.startswith("RHS"):
             fields = line.split()
 
             for index, field in enumerate(fields):
                 if index!=0:
                     if index%2 != 0:
-                        constraints_var_n_values[field].update({"rhs": float(fields[index+1])})
+                        constraints_var_n_values[map_constraints[field]].update({"rhs": float(fields[index+1])})
 
 
-        if flag_read_parts["BOUNDS"] and not line.startswith("BOUNDS"):
+        if reading_now == "BOUNDS" and not line.startswith("BOUNDS"):
+
             fields = line.split()
+
+            var_index = map_variables[fields[2]]
             if fields[0] == "LO":
-                variables[fields[2]].update({"LB": float(fields[3])})
+                variables[var_index].update({"lower_bound": float(fields[3])})
 
             if fields[0] == "UP":
-                variables[fields[2]].update({"UB": float(fields[3])})
+                variables[var_index].update({"upper_bound": float(fields[3])})
 
             if fields[0] == "FX":
-                variables[fields[2]].update({"LB": float(fields[3]),
-                                             "UB": float(fields[3])})
+                variables[var_index].update({"lower_bound": float(fields[3]),
+                                             "upper_bound": float(fields[3])})
 
             if fields[0] == "FR":
-                variables[fields[2]].update({"LB": -cplex.infinity,
-                                        "UB": cplex.infinity})
+                variables[var_index].update({"lower_bound": -cplex.infinity,
+                                        "upper_bound": cplex.infinity})
 
             if fields[0] == "MI":
-                variables[fields[2]].update({"LB": -cplex.infinity})
+                variables[var_index].update({"lower_bound": -cplex.infinity})
 
             if fields[0] == "PL":
-                variables[fields[2]].update({"LB": cplex.infinity})
+                variables[var_index].update({"lower_bound": cplex.infinity})
 
             if fields[0] == "BV":
-                print("")
+                variables[var_index].update({"type": "I"})
 
             if fields[0] == "LI":
-                variables[fields[2]].update({"LB": float(fields[3])})
+                variables[var_index].update({"lower_bound": float(fields[3]),
+                                             "type": "I"})
 
 
             if fields[0] == "UI":
-                variables[fields[2]].update({"UB": float(fields[3])})
+                variables[var_index].update({"upper_bound": float(fields[3]),
+                                             "type": "I"})
 
 
             if fields[0] == "SC":
-                variables[fields[2]].update({"LB": float(fields[3])})
+                variables[var_index].update({"lower_bound": float(fields[3]),
+                                             "type": "I"})
 
 
             if fields[0] == "SI":
-                variables[fields[2]].update({"UB": float(fields[3])})
+                variables[var_index].update({"upper_bound": float(fields[3])})
 
 
 
-
-    with open("constraints.json", "w") as outfile:
+    with open("json-tests/constraints.json", "w") as outfile:
        json.dump(constraints_var_n_values, outfile, indent=4)
 
-    with open("variables.json", "w") as outfile:
+    with open("json-tests/variables.json", "w") as outfile:
        json.dump(variables, outfile, indent=4)
 
-    with open("objs.json", "w") as outfile:
-       json.dump(obj_values, outfile, indent=4)
+    with open("json-tests/const_maps.json", "w") as outfile:
+        json.dump(map_constraints, outfile, indent=4)
 
+    with open("json-tests/var_maps.json", "w") as outfile:
+        json.dump(map_variables, outfile, indent=4)
 
     for variable in variables.items():
-        lower_bounds.append(variable[1]["LB"])
-        upper_bounds.append(variable[1]["UB"])
+        lower_bounds.append(variable[1]["lower_bound"])
+        upper_bounds.append(variable[1]["upper_bound"])
         types = types + variable[1]["type"]
-        if variable[0] in obj_values:
-            obj.append(float(obj_values[variable[0]]))
-        else:
-            obj.append(0.0)
+        obj.append(float(variable[1][obj_name]))
         variables_names.append(variable[0])
 
     for constraints_var_n_value in constraints_var_n_values.items():
         rhs.append(constraints_var_n_value[1]["rhs"])
 
-    return rhs, variables, lower_bounds, upper_bounds, variables_names, constraints_names, senses, constraints_var_n_values, types, obj
 
+    return rhs, variables, lower_bounds, upper_bounds, variables_names, constraints_names, senses, constraints_var_n_values, types, obj, obj_sense
 
 def populate_by_row(prob):
     rows = []
-    rhs, variables, lower_bounds, upper_bounds, variables_names, constraints_names, senses, constraints_var_n_values, types, obj = parse_mps()
+    rhs, variables, lower_bounds, upper_bounds, variables_names, constraints_names, senses, constraints_var_n_values, types, obj, obj_sense = parse_mps()
     for constraint in constraints_var_n_values.items():
         rows.append([constraint[1]["variables"], constraint[1]["values"]])
+
+    if obj_sense == "MIN":
+        prob.objective.set_sense(prob.objective.sense.minimize)
+    else:
+        prob.objective.set_sense(prob.objective.sense.maximize)
 
     prob.variables.add(obj = obj, lb = lower_bounds, ub=upper_bounds,
                        types = types, names=variables_names)
 
     prob.linear_constraints.add(lin_expr=rows, senses=senses,
                                 rhs=rhs, names=constraints_names)
-
-
 def populate_by_col(prob):
     columns = []
-    rhs, variables, lower_bounds, upper_bounds, variables_names, constraints_names, senses, constraints_var_n_values, types, obj = parse_mps()
+    rhs, variables, lower_bounds, upper_bounds, variables_names, constraints_names, senses, constraints_var_n_values, types, obj, obj_sense = parse_mps()
+    if obj_sense == "MIN":
+        prob.objective.set_sense(prob.objective.sense.minimize)
+    else:
+        prob.objective.set_sense(prob.objective.sense.maximize)
+
     prob.linear_constraints.add(senses=senses,
                                 rhs=rhs, names=constraints_names)
 
@@ -220,8 +238,6 @@ def populate_by_col(prob):
 
     prob.variables.add(obj=obj, lb=lower_bounds, ub=upper_bounds,
                        names=variables_names, types=types, columns=columns)
-
-
 def populate_by_non_zero(prob):
     aux = []
     vars_values_aux = []
@@ -229,14 +245,12 @@ def populate_by_non_zero(prob):
     rows = []
     cols = []
 
-    rhs, variables, lower_bounds, upper_bounds, variables_names, constraints_names, senses, constraints_var_n_values, types, obj = parse_mps()
+    rhs, variables, lower_bounds, upper_bounds, variables_names, constraints_names, senses, constraints_var_n_values, types, obj, obj_sense = parse_mps()
     for constraint in constraints_var_n_values.items():
         aux.append(constraint[1]["variables"])
 
-
     for constraint in constraints_var_n_values.items():
         vars_values_aux.append(constraint[1]["values"])
-    print(vars_values_aux)
 
     for index, vars in enumerate(aux):
         for var in vars:
@@ -247,6 +261,10 @@ def populate_by_non_zero(prob):
         for vv in var_val:
             vals.append(vv)
 
+    if obj_sense == "MIN":
+        prob.objective.set_sense(prob.objective.sense.minimize)
+    else:
+        prob.objective.set_sense(prob.objective.sense.maximize)
 
     prob.linear_constraints.add(senses=senses,rhs=rhs, names=constraints_names)
 
@@ -262,14 +280,17 @@ def mipex1(pop_method):
         my_prob = cplex.Cplex()
 
         if pop_method == "r":
-            print("Populate by row")
-            handle = populate_by_row(my_prob)
+            print("Populating by row")
+            populate_by_row(my_prob)
+
         elif pop_method == "c":
-            print("Populate by col")
-            handle = populate_by_col(my_prob)
+            print("Populating by col")
+            populate_by_col(my_prob)
+
         elif pop_method == "n":
-            print("Populate by non zero")
-            handle = populate_by_non_zero(my_prob)
+            print("Populating by non zero")
+            populate_by_non_zero(my_prob)
+
         else:
             raise ValueError('pop_method must be one of "r", "c" or "n"')
 
@@ -279,9 +300,7 @@ def mipex1(pop_method):
         return
 
     print()
-    # solution.get_status() returns an integer code
     print("Solution status = ", my_prob.solution.get_status(), ":", end=' ')
-    # the following line prints the corresponding string
     print(my_prob.solution.status[my_prob.solution.get_status()])
     print("Solution value  = ", my_prob.solution.get_objective_value())
 
@@ -291,10 +310,10 @@ def mipex1(pop_method):
     slack = my_prob.solution.get_linear_slacks()
     x = my_prob.solution.get_values()
     #
-    # for j in range(numrows):
-    #     print("Row %d:  Slack = %10f" % (j, slack[j]))
-    # for j in range(numcols):
-    #     print("Column %d:  Value = %10f" % (j, x[j]))
+    for j in range(numrows):
+        print("Row %d:  Slack = %10f" % (j, slack[j]))
+    for j in range(numcols):
+        print("Column %d:  Value = %10f" % (j, x[j]))
 
     print("Solution value  = ", my_prob.solution.get_objective_value())
 
