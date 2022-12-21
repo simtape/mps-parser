@@ -3,7 +3,7 @@ import cplex
 from cplex.exceptions import CplexError
 import sys
 
-file1 = open('simple.mps')
+file1 = open('neos-3046601-motu.mps')
 lines = file1.readlines()
 
 def parse_mps_v2():
@@ -16,6 +16,7 @@ def parse_mps_v2():
     types = ""
     senses = ""
     reading_now = ""
+    obj_sense = "MIN"
 
     constraints_var_n_values = {}
     variables = {}
@@ -33,6 +34,9 @@ def parse_mps_v2():
     map_variables = {}
     map_constraints = {}
     for line in lines:
+        if line.startswith("OBJSENSE"):
+            reading_now = "OBJSENSE"
+
         if line.startswith("ROWS"):
             reading_now = "ROWS"
 
@@ -47,6 +51,11 @@ def parse_mps_v2():
 
         if line.startswith("ENDATA"):
             reading_now = "ENDATA"
+
+        if reading_now == "OBJSENSE" and not line.startswith("OBJSENSE"):
+            fields = line.split()
+            obj_sense = fields[0]
+
 
         if reading_now == "ROWS" and not line.startswith("ROWS"):
             if line.split()[0] != "N":
@@ -98,10 +107,10 @@ def parse_mps_v2():
                     if index%2 != 0 and field == obj_name:
                         variables[var_index].update({obj_name: fields[index+1]})
 
-            if fields[0] == "MARK0000":
+            if fields[2] == "'INTORG'":
                     marker_session = "I"
 
-            elif fields[0] == "MARK00000":
+            elif fields[2] == "'INTEND'":
                     marker_session = "C"
 
             if marker_session == "C" and fields[1] != "'MARKER'":
@@ -151,18 +160,21 @@ def parse_mps_v2():
                 variables[var_index].update({"lower_bound": cplex.infinity})
 
             if fields[0] == "BV":
-                print("")
+                variables[var_index].update({"type": "I"})
 
             if fields[0] == "LI":
-                variables[var_index].update({"lower_bound": float(fields[3])})
+                variables[var_index].update({"lower_bound": float(fields[3]),
+                                             "type": "I"})
 
 
             if fields[0] == "UI":
-                variables[var_index].update({"upper_bound": float(fields[3])})
+                variables[var_index].update({"upper_bound": float(fields[3]),
+                                             "type": "I"})
 
 
             if fields[0] == "SC":
-                variables[var_index].update({"lower_bound": float(fields[3])})
+                variables[var_index].update({"lower_bound": float(fields[3]),
+                                             "type": "I"})
 
 
             if fields[0] == "SI":
@@ -193,7 +205,7 @@ def parse_mps_v2():
         rhs.append(constraints_var_n_value[1]["rhs"])
 
 
-    return rhs, variables, lower_bounds, upper_bounds, variables_names, constraints_names, senses, constraints_var_n_values, types, obj
+    return rhs, variables, lower_bounds, upper_bounds, variables_names, constraints_names, senses, constraints_var_n_values, types, obj, obj_sense
 
 
 def parse_mps():
@@ -337,18 +349,21 @@ def parse_mps():
                 variables[fields[2]].update({"LB": cplex.infinity})
 
             if fields[0] == "BV":
-                print("")
+                variables[fields[2]].update({"type": "I"})
 
             if fields[0] == "LI":
-                variables[fields[2]].update({"LB": float(fields[3])})
+                variables[fields[2]].update({"LB": float(fields[3]),
+                                            "type": "I"})
 
 
             if fields[0] == "UI":
-                variables[fields[2]].update({"UB": float(fields[3])})
+                variables[fields[2]].update({"UB": float(fields[3]),
+                                            "type": "I"})
 
 
             if fields[0] == "SC":
-                variables[fields[2]].update({"LB": float(fields[3])})
+                variables[fields[2]].update({"LB": float(fields[3]),
+                                             "type": "I"})
 
 
             if fields[0] == "SI":
@@ -388,31 +403,29 @@ def parse_mps():
 
 def populate_by_row(prob):
     rows = []
-    rhs, variables, lower_bounds, upper_bounds, variables_names, constraints_names, senses, constraints_var_n_values, types, obj = parse_mps()
+    rhs, variables, lower_bounds, upper_bounds, variables_names, constraints_names, senses, constraints_var_n_values, types, obj, obj_sense = parse_mps_v2()
     for constraint in constraints_var_n_values.items():
         rows.append([constraint[1]["variables"], constraint[1]["values"]])
 
+    if obj_sense == "MIN":
+        prob.objective.set_sense(prob.objective.sense.minimize)
+    else:
+        prob.objective.set_sense(prob.objective.sense.maximize)
+
     prob.variables.add(obj = obj, lb = lower_bounds, ub=upper_bounds,
                        types = types, names=variables_names)
-    print("rows" + str(rows))
-    print("my obj vector" + str(obj))
-    print("lower_bounds" + str(lower_bounds))
-    print("upper_bounds" + str(upper_bounds))
-    print("types" + str(types))
-    print("name_variables" + str(variables_names))
 
     prob.linear_constraints.add(lin_expr=rows, senses=senses,
                                 rhs=rhs, names=constraints_names)
 
-    print("senses" + str(senses))
-    print("rhs" + str(rhs))
-    print("constraints_names" + str(constraints_names))
-
-
-
 def populate_by_col(prob):
     columns = []
-    rhs, variables, lower_bounds, upper_bounds, variables_names, constraints_names, senses, constraints_var_n_values, types, obj = parse_mps()
+    rhs, variables, lower_bounds, upper_bounds, variables_names, constraints_names, senses, constraints_var_n_values, types, obj, obj_sense = parse_mps_v2()
+    if obj_sense == "MIN":
+        prob.objective.set_sense(prob.objective.sense.minimize)
+    else:
+        prob.objective.set_sense(prob.objective.sense.maximize)
+
     prob.linear_constraints.add(senses=senses,
                                 rhs=rhs, names=constraints_names)
 
@@ -430,7 +443,7 @@ def populate_by_non_zero(prob):
     rows = []
     cols = []
 
-    rhs, variables, lower_bounds, upper_bounds, variables_names, constraints_names, senses, constraints_var_n_values, types, obj = parse_mps()
+    rhs, variables, lower_bounds, upper_bounds, variables_names, constraints_names, senses, constraints_var_n_values, types, obj, obj_sense = parse_mps_v2()
     for constraint in constraints_var_n_values.items():
         aux.append(constraint[1]["variables"])
 
@@ -446,6 +459,10 @@ def populate_by_non_zero(prob):
         for vv in var_val:
             vals.append(vv)
 
+    if obj_sense == "MIN":
+        prob.objective.set_sense(prob.objective.sense.minimize)
+    else:
+        prob.objective.set_sense(prob.objective.sense.maximize)
 
     prob.linear_constraints.add(senses=senses,rhs=rhs, names=constraints_names)
 
