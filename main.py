@@ -3,7 +3,7 @@ import cplex
 from cplex.exceptions import CplexError
 import sys
 
-file1 = open('gen-ip021.mps')
+file1 = open('simple.mps')
 lines = file1.readlines()
 
 def parse_mps_v2():
@@ -380,20 +380,34 @@ def parse_mps():
     for constraints_var_n_value in constraints_var_n_values.items():
         rhs.append(constraints_var_n_value[1]["rhs"])
 
+    print(senses)
+    print(types)
+
     return rhs, variables, lower_bounds, upper_bounds, variables_names, constraints_names, senses, constraints_var_n_values, types, obj
 
 
 def populate_by_row(prob):
     rows = []
-    rhs, variables, lower_bounds, upper_bounds, variables_names, constraints_names, senses, constraints_var_n_values, types, obj = parse_mps_v2()
+    rhs, variables, lower_bounds, upper_bounds, variables_names, constraints_names, senses, constraints_var_n_values, types, obj = parse_mps()
     for constraint in constraints_var_n_values.items():
         rows.append([constraint[1]["variables"], constraint[1]["values"]])
 
     prob.variables.add(obj = obj, lb = lower_bounds, ub=upper_bounds,
                        types = types, names=variables_names)
+    print("rows" + str(rows))
+    print("my obj vector" + str(obj))
+    print("lower_bounds" + str(lower_bounds))
+    print("upper_bounds" + str(upper_bounds))
+    print("types" + str(types))
+    print("name_variables" + str(variables_names))
 
     prob.linear_constraints.add(lin_expr=rows, senses=senses,
                                 rhs=rhs, names=constraints_names)
+
+    print("senses" + str(senses))
+    print("rhs" + str(rhs))
+    print("constraints_names" + str(constraints_names))
+
 
 
 def populate_by_col(prob):
