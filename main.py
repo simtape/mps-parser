@@ -1,25 +1,26 @@
 import json
-import cplex
-from cplex.exceptions import CplexError
 import sys
 
-file1 = open('mps_files/gen-ip002.mps')
-lines = file1.readlines()
+import cplex
+from cplex.exceptions import CplexError
 
-def parse_mps():
+
+def parse_mps(filepath: str):
+    file1 = open(filepath)
+    lines = file1.readlines()
 
     rhs = []
-    lower_bounds = []
-    upper_bounds = []
+    lo_bounds = []
+    up_bounds = []
     variables_names = []
-    constraints_names = []
+    const_names = []
     types = ""
     senses = ""
-    reading_now = ""
+    now_parsing = ""
     obj_sense = "MIN"
 
-    constraints_var_n_values = {}
-    variables = {}
+    const_var_values = {}
+    vars = {}
     obj = []
     obj_name = ""
 
@@ -35,57 +36,54 @@ def parse_mps():
     map_constraints = {}
     for line in lines:
         if line.startswith("OBJSENSE"):
-            reading_now = "OBJSENSE"
+            now_parsing = "OBJSENSE"
 
         if line.startswith("ROWS"):
-            reading_now = "ROWS"
+            now_parsing = "ROWS"
 
         if line.startswith("COLUMNS"):
-            reading_now = "COLUMNS"
+            now_parsing = "COLUMNS"
 
         if line.startswith("RHS"):
-            reading_now = "RHS"
+            now_parsing = "RHS"
 
         if line.startswith("BOUNDS"):
-            reading_now = "BOUNDS"
+            now_parsing = "BOUNDS"
 
         if line.startswith("ENDATA"):
-            reading_now = "ENDATA"
+            now_parsing = "ENDATA"
 
-        if reading_now == "OBJSENSE" and not line.startswith("OBJSENSE"):
+        if now_parsing == "OBJSENSE" and not line.startswith("OBJSENSE"):
             fields = line.split()
             obj_sense = fields[0]
 
-
-        if reading_now == "ROWS" and not line.startswith("ROWS"):
+        if now_parsing == "ROWS" and not line.startswith("ROWS"):
             if line.split()[0] != "N":
                 counter_constraints += 1
                 name_constraint = line.split()[1]
                 map_constraints[name_constraint] = constraint_name + str(counter_constraints)
 
                 senses = senses + (line.split()[0])
-                constraints_var_n_values[map_constraints[name_constraint]] = {"variables": [],
-                                                             "values": [],
-                                                             "rhs": 0.00,
-                                                             }
-                constraints_names.append(map_constraints[name_constraint])
+                const_var_values[map_constraints[name_constraint]] = {"variables": [],
+                                                                      "values": [],
+                                                                      "rhs": 0.00,
+                                                                      }
+                const_names.append(map_constraints[name_constraint])
 
             elif line.split()[0] == "N":
                 obj_name = line.split()[1]
 
-
-
-        if reading_now == "COLUMNS" and not line.startswith("COLUMNS"):
+        if now_parsing == "COLUMNS" and not line.startswith("COLUMNS"):
             fields = line.split()
             name_variable = fields[0]
             if fields[0] not in map_variables.keys() and fields[0] != "MARK0000" and fields[0] != "MARK0001":
                 counter_variables += 1
                 map_variables[name_variable] = variable_name + str(counter_variables)
-                var_index = map_variables[name_variable]
+                var_index: str = map_variables[name_variable]
 
             if fields[0] != "MARK0000" and fields[0] != "MARK0001":
-                if var_index not in variables:
-                    variables[var_index] = {"constraint_names": [],
+                if var_index not in vars:
+                    vars[var_index] = {"constraint_names": [],
                                             "constraint_values": [],
                                             "lower_bound": 0.00,
                                             "upper_bound": cplex.infinity,
@@ -93,99 +91,91 @@ def parse_mps():
                                             obj_name: 0.00}
 
             for index, field in enumerate(fields):
-                    if index != 0 and index % 2 != 0 and field != "'MARKER'" and field != obj_name:
+                if index != 0 and index % 2 != 0 and field != "'MARKER'" and field != obj_name:
+                    constraint_index = map_constraints[fields[index]]
+                    if constraint_index in const_var_values.keys():
                         constraint_index = map_constraints[fields[index]]
-                        if constraint_index in constraints_var_n_values.keys():
-                            constraint_index = map_constraints[fields[index]]
-                            constraints_var_n_values[constraint_index]["variables"].append(var_index)
-                            constraints_var_n_values[constraint_index]["values"].append(float(fields[index+1]))
-                            variables[var_index]["constraint_names"].append(constraint_index)
-                            variables[var_index]["constraint_values"].append(float(fields[index + 1]))
+                        const_var_values[constraint_index]["variables"].append(var_index)
+                        const_var_values[constraint_index]["values"].append(float(fields[index + 1]))
+                        vars[var_index]["constraint_names"].append(constraint_index)
+                        vars[var_index]["constraint_values"].append(float(fields[index + 1]))
 
-
-                    if index%2 != 0 and field == obj_name:
-                        variables[var_index].update({obj_name: fields[index+1]})
+                if index % 2 != 0 and field == obj_name:
+                    vars[var_index].update({obj_name: fields[index + 1]})
 
             if fields[2] == "'INTORG'":
-                    marker_session = "I"
+                marker_session = "I"
 
             elif fields[2] == "'INTEND'":
-                    marker_session = "C"
+                marker_session = "C"
 
             if marker_session == "C" and fields[1] != "'MARKER'":
-                variables[map_variables[fields[0]]].update( {"lower_bound": float(0.00),
-                                        "upper_bound": cplex.infinity,
-                                        "type": "C"})
+                vars[map_variables[fields[0]]].update({"lower_bound": float(0.00),
+                                                            "upper_bound": cplex.infinity,
+                                                            "type": "C"})
 
             elif marker_session == "I" and fields[1] != "'MARKER'":
-                variables[map_variables[fields[0]]].update({"lower_bound": float(0.00),
-                                        "upper_bound": cplex.infinity,
-                                        "type": "I"
-                                       })
+                vars[map_variables[fields[0]]].update({"lower_bound": float(0.00),
+                                                            "upper_bound": cplex.infinity,
+                                                            "type": "I"
+                                                            })
 
-
-        if reading_now == "RHS" and not line.startswith("RHS"):
+        if now_parsing == "RHS" and not line.startswith("RHS"):
             fields = line.split()
 
             for index, field in enumerate(fields):
-                if index!=0:
-                    if index%2 != 0:
-                        constraints_var_n_values[map_constraints[field]].update({"rhs": float(fields[index+1])})
+                if index != 0:
+                    if index % 2 != 0:
+                        const_var_values[map_constraints[field]].update({"rhs": float(fields[index + 1])})
 
-
-        if reading_now == "BOUNDS" and not line.startswith("BOUNDS"):
+        if now_parsing == "BOUNDS" and not line.startswith("BOUNDS"):
 
             fields = line.split()
 
             var_index = map_variables[fields[2]]
             if fields[0] == "LO":
-                variables[var_index].update({"lower_bound": float(fields[3])})
+                vars[var_index].update({"lower_bound": float(fields[3])})
 
             if fields[0] == "UP":
-                variables[var_index].update({"upper_bound": float(fields[3])})
+                vars[var_index].update({"upper_bound": float(fields[3])})
 
             if fields[0] == "FX":
-                variables[var_index].update({"lower_bound": float(fields[3]),
+                vars[var_index].update({"lower_bound": float(fields[3]),
                                              "upper_bound": float(fields[3])})
 
             if fields[0] == "FR":
-                variables[var_index].update({"lower_bound": -cplex.infinity,
-                                        "upper_bound": cplex.infinity})
+                vars[var_index].update({"lower_bound": -cplex.infinity,
+                                             "upper_bound": cplex.infinity})
 
             if fields[0] == "MI":
-                variables[var_index].update({"lower_bound": -cplex.infinity})
+                vars[var_index].update({"lower_bound": -cplex.infinity})
 
             if fields[0] == "PL":
-                variables[var_index].update({"lower_bound": cplex.infinity})
+                vars[var_index].update({"lower_bound": cplex.infinity})
 
             if fields[0] == "BV":
-                variables[var_index].update({"type": "I"})
+                vars[var_index].update({"type": "I"})
 
             if fields[0] == "LI":
-                variables[var_index].update({"lower_bound": float(fields[3]),
+                vars[var_index].update({"lower_bound": float(fields[3]),
                                              "type": "I"})
-
 
             if fields[0] == "UI":
-                variables[var_index].update({"upper_bound": float(fields[3]),
+                vars[var_index].update({"upper_bound": float(fields[3]),
                                              "type": "I"})
-
 
             if fields[0] == "SC":
-                variables[var_index].update({"lower_bound": float(fields[3]),
+                vars[var_index].update({"lower_bound": float(fields[3]),
                                              "type": "I"})
 
-
             if fields[0] == "SI":
-                variables[var_index].update({"upper_bound": float(fields[3])})
-
-
+                vars[var_index].update({"upper_bound": float(fields[3])})
 
     with open("json-tests/constraints.json", "w") as outfile:
-       json.dump(constraints_var_n_values, outfile, indent=4)
+        json.dump(const_var_values, outfile, indent=4)
 
     with open("json-tests/variables.json", "w") as outfile:
-       json.dump(variables, outfile, indent=4)
+        json.dump(vars, outfile, indent=4)
 
     with open("json-tests/const_maps.json", "w") as outfile:
         json.dump(map_constraints, outfile, indent=4)
@@ -193,23 +183,24 @@ def parse_mps():
     with open("json-tests/var_maps.json", "w") as outfile:
         json.dump(map_variables, outfile, indent=4)
 
-    for variable in variables.items():
-        lower_bounds.append(variable[1]["lower_bound"])
-        upper_bounds.append(variable[1]["upper_bound"])
+    for variable in vars.items():
+        lo_bounds.append(variable[1]["lower_bound"])
+        up_bounds.append(variable[1]["upper_bound"])
         types = types + variable[1]["type"]
         obj.append(float(variable[1][obj_name]))
         variables_names.append(variable[0])
 
-    for constraints_var_n_value in constraints_var_n_values.items():
+    for constraints_var_n_value in const_var_values.items():
         rhs.append(constraints_var_n_value[1]["rhs"])
 
+    return rhs, vars, lo_bounds, up_bounds, variables_names, const_names, senses, const_var_values, types, obj, obj_sense
 
-    return rhs, variables, lower_bounds, upper_bounds, variables_names, constraints_names, senses, constraints_var_n_values, types, obj, obj_sense
 
-def populate_by_row(prob):
+def populate_by_row(prob, filepath: str):
     rows = []
-    rhs, variables, lower_bounds, upper_bounds, variables_names, constraints_names, senses, constraints_var_n_values, types, obj, obj_sense = parse_mps()
-    for constraint in constraints_var_n_values.items():
+    rhs, variables, lower_bounds, upper_bounds, variables_names, const_names, senses, const_var_values, types, obj, obj_sense = parse_mps(
+        filepath)
+    for constraint in const_var_values.items():
         rows.append([constraint[1]["variables"], constraint[1]["values"]])
 
     if obj_sense == "MIN":
@@ -217,14 +208,17 @@ def populate_by_row(prob):
     else:
         prob.objective.set_sense(prob.objective.sense.maximize)
 
-    prob.variables.add(obj = obj, lb = lower_bounds, ub=upper_bounds,
-                       types = types, names=variables_names)
+    prob.variables.add(obj=obj, lb=lower_bounds, ub=upper_bounds,
+                       types=types, names=variables_names)
 
     prob.linear_constraints.add(lin_expr=rows, senses=senses,
-                                rhs=rhs, names=constraints_names)
-def populate_by_col(prob):
+                                rhs=rhs, names=const_names)
+
+
+def populate_by_col(prob, filepath: str):
     columns = []
-    rhs, variables, lower_bounds, upper_bounds, variables_names, constraints_names, senses, constraints_var_n_values, types, obj, obj_sense = parse_mps()
+    rhs, variables, lower_bounds, upper_bounds, variables_names, constraints_names, senses, constraints_var_n_values, types, obj, obj_sense = parse_mps(
+        filepath)
     if obj_sense == "MIN":
         prob.objective.set_sense(prob.objective.sense.minimize)
     else:
@@ -234,18 +228,21 @@ def populate_by_col(prob):
                                 rhs=rhs, names=constraints_names)
 
     for variable in variables.items():
-        columns.append([variable[1]["constraint_names"], variable[1]["constraint_values"]] )
+        columns.append([variable[1]["constraint_names"], variable[1]["constraint_values"]])
 
     prob.variables.add(obj=obj, lb=lower_bounds, ub=upper_bounds,
                        names=variables_names, types=types, columns=columns)
-def populate_by_non_zero(prob):
+
+
+def populate_by_non_zero(prob, filepath: str):
     aux = []
     vars_values_aux = []
     vals = []
     rows = []
     cols = []
 
-    rhs, variables, lower_bounds, upper_bounds, variables_names, constraints_names, senses, constraints_var_n_values, types, obj, obj_sense = parse_mps()
+    rhs, variables, lower_bounds, upper_bounds, variables_names, constraints_names, senses, constraints_var_n_values, types, obj, obj_sense = parse_mps(
+        filepath)
     for constraint in constraints_var_n_values.items():
         aux.append(constraint[1]["variables"])
 
@@ -266,30 +263,29 @@ def populate_by_non_zero(prob):
     else:
         prob.objective.set_sense(prob.objective.sense.maximize)
 
-    prob.linear_constraints.add(senses=senses,rhs=rhs, names=constraints_names)
+    prob.linear_constraints.add(senses=senses, rhs=rhs, names=constraints_names)
 
     prob.variables.add(obj=obj, lb=lower_bounds, ub=upper_bounds, names=variables_names, types=types)
-
 
     prob.linear_constraints.set_coefficients(zip(rows, cols, vals))
 
 
-def mipex1(pop_method):
-
+def mipex1(pop_method, filepath):
+    print(filepath)
     try:
         my_prob = cplex.Cplex()
 
         if pop_method == "r":
             print("Populating by row")
-            populate_by_row(my_prob)
+            populate_by_row(my_prob, filepath)
 
         elif pop_method == "c":
             print("Populating by col")
-            populate_by_col(my_prob)
+            populate_by_col(my_prob, filepath)
 
         elif pop_method == "n":
             print("Populating by non zero")
-            populate_by_non_zero(my_prob)
+            populate_by_non_zero(my_prob, filepath)
 
         else:
             raise ValueError('pop_method must be one of "r", "c" or "n"')
@@ -301,7 +297,7 @@ def mipex1(pop_method):
 
     print()
     print("Solution status = ", my_prob.solution.get_status(), ":", end=' ')
-    print(my_prob.solution.status[my_prob.solution.get_status()])
+    # print(my_prob.solution.status[my_prob.solution.get_status()])
     print("Solution value  = ", my_prob.solution.get_objective_value())
 
     numcols = my_prob.variables.get_num()
@@ -310,17 +306,16 @@ def mipex1(pop_method):
     slack = my_prob.solution.get_linear_slacks()
     x = my_prob.solution.get_values()
     #
-    for j in range(numrows):
-        print("Row %d:  Slack = %10f" % (j, slack[j]))
-    for j in range(numcols):
-        print("Column %d:  Value = %10f" % (j, x[j]))
+    # for j in range(numrows):
+    #     print("Row %d:  Slack = %10f" % (j, slack[j]))
+    # for j in range(numcols):
+    #     print("Column %d:  Value = %10f" % (j, x[j]))
 
     print("Solution value  = ", my_prob.solution.get_objective_value())
 
 
-
 if __name__ == "__main__":
-    if len(sys.argv) != 2 or sys.argv[1] not in ["-r", "-c", "-n"]:
+    if len(sys.argv) != 3 or sys.argv[1] not in ["-r", "-c", "-n"]:
         print("Usage: mipex1.py -X")
         print("   where X is one of the following options:")
         print("      r          generate problem by row")
@@ -328,4 +323,4 @@ if __name__ == "__main__":
         print("      n          generate problem by nonzero")
         print(" Exiting...")
         sys.exit(-1)
-    mipex1(sys.argv[1][1])
+    mipex1(sys.argv[1][1], sys.argv[2])
