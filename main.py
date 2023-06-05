@@ -316,7 +316,7 @@ def mipex1(pop_method, filepath):
 
 if __name__ == "__main__":
     if len(sys.argv) != 3 or sys.argv[1] not in ["-r", "-c", "-n"]:
-        print("Usage: mipex1.py -X")
+        print("Usage: main.py -X")
         print("   where X is one of the following options:")
         print("      r          generate problem by row")
         print("      c          generate problem by column")
