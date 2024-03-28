@@ -1,9 +1,12 @@
 import json
+import os
+
 import cplex
 from cplex.exceptions import CplexError
 import sys
 
-file1 = open('mps_files/gen-ip002.mps')
+mps_file_name = "control.mps"
+file1 = open('control.mps')
 lines = file1.readlines()
 
 def parse_mps():
@@ -180,17 +183,22 @@ def parse_mps():
                 variables[var_index].update({"upper_bound": float(fields[3])})
 
 
+    # if not exists, create folder with mps name
+    dir_name = mps_file_name.split(".")[0]
+    if not os.path.exists(dir_name):
+        os.makedirs(dir_name)
 
-    with open("json-tests/constraints.json", "w") as outfile:
+
+    with open(dir_name + "/populated_by_rows.json", "w") as outfile:
        json.dump(constraints_var_n_values, outfile, indent=4)
 
-    with open("json-tests/variables.json", "w") as outfile:
+    with open(dir_name + "/populated_by_columns.json", "w") as outfile:
        json.dump(variables, outfile, indent=4)
 
-    with open("json-tests/const_maps.json", "w") as outfile:
+    with open(dir_name + "/const_maps.json", "w") as outfile:
         json.dump(map_constraints, outfile, indent=4)
 
-    with open("json-tests/var_maps.json", "w") as outfile:
+    with open(dir_name + "/var_maps.json", "w") as outfile:
         json.dump(map_variables, outfile, indent=4)
 
     for variable in variables.items():
@@ -235,6 +243,10 @@ def populate_by_col(prob):
 
     for variable in variables.items():
         columns.append([variable[1]["constraint_names"], variable[1]["constraint_values"]] )
+
+    # save columns to json
+    with open("columns.json", "w") as outfile:
+        json.dump(columns, outfile, indent=4)
 
     prob.variables.add(obj=obj, lb=lower_bounds, ub=upper_bounds,
                        names=variables_names, types=types, columns=columns)
